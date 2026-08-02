@@ -60,7 +60,7 @@ def get_options():
     if not os.path.exists(DATASET_PATH):
         raise HTTPException(status_code=404, detail="Dataset not found")
     
-    df = pd.read_csv(DATASET_PATH)
+    df = pd.read_csv(DATASET_PATH, keep_default_na=False, na_values=['', 'NaN', 'nan', 'null'])
     
     return {
         "job_roles": sorted(df['Job Role'].dropna().unique().tolist()) if 'Job Role' in df.columns else [],
@@ -105,7 +105,7 @@ def predict_salary(data: EmployeeData):
                 
                 context_data = "No dataset available."
                 if os.path.exists(DATASET_PATH):
-                    df_ctx = pd.read_csv(DATASET_PATH)
+                    df_ctx = pd.read_csv(DATASET_PATH, keep_default_na=False, na_values=['', 'NaN', 'nan', 'null'])
                     similar = df_ctx[(df_ctx['Job Role'] == data.Job_Role) & (df_ctx['Location'] == data.Location)]
                     if len(similar) < 5:
                         similar = df_ctx[(df_ctx['Job Role'] == data.Job_Role)]
@@ -163,7 +163,7 @@ async def predict_batch(file: UploadFile = File(...)):
         
     try:
         contents = await file.read()
-        df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
+        df = pd.read_csv(io.StringIO(contents.decode('utf-8')), keep_default_na=False, na_values=['', 'NaN', 'nan', 'null'])
         
         required_cols = ['Age', 'Gender', 'Education Level', 'Years of Experience', 'Job Role', 'Department', 'Location', 'Performance Rating', 'Skills', 'Company Tier', 'Certifications', 'Past Companies']
         missing_cols = [col for col in required_cols if col not in df.columns]
@@ -178,6 +178,7 @@ async def predict_batch(file: UploadFile = File(...)):
         # Return as JSON records so React can render a table
         formatted_df = df.copy()
         formatted_df['Predicted Salary (₹)'] = formatted_df['Predicted Salary (₹)'].apply(lambda x: f"₹{x:,.2f}")
+        formatted_df = formatted_df.where(pd.notnull(formatted_df), None)
         
         return {"results": formatted_df.to_dict(orient="records")}
         
@@ -189,7 +190,7 @@ def get_visualization_data():
     if not os.path.exists(DATASET_PATH):
         raise HTTPException(status_code=404, detail="Dataset not found")
         
-    df = pd.read_csv(DATASET_PATH)
+    df = pd.read_csv(DATASET_PATH, keep_default_na=False, na_values=['', 'NaN', 'nan', 'null'])
     
     # Pre-aggregate data to send minimal payload
     # 1. Salary Distribution (histogram bins approx)
@@ -214,9 +215,6 @@ def get_visualization_data():
 @app.post("/api/predict_resume")
 async def predict_resume(file: UploadFile = File(...)):
     current_api_key = os.getenv("GROK_API_KEY")
-    if not current_api_key:
-        raise HTTPException(status_code=500, detail="GROK_API_KEY not configured in backend")
-        
     try:
         contents = await file.read()
         filename = file.filename.lower()
@@ -251,7 +249,7 @@ async def predict_resume(file: UploadFile = File(...)):
         
         context_data = "No dataset available."
         if os.path.exists(DATASET_PATH):
-            df_ctx = pd.read_csv(DATASET_PATH)
+            df_ctx = pd.read_csv(DATASET_PATH, keep_default_na=False, na_values=['', 'NaN', 'nan', 'null'])
             context_data = df_ctx[['Job Role', 'Years of Experience', 'Location', 'Skills', 'Salary']].sample(min(15, len(df_ctx))).to_csv(index=False)
             
         prompt = (
@@ -327,13 +325,23 @@ async def predict_resume(file: UploadFile = File(...)):
             ai_data = json.loads(res_text)
             
         profile = ai_data.get("extracted_profile", {})
+        job_role = profile.get('Job_Role', 'Software Engineer')
+        dept_map = {
+            'Software Engineer': 'IT',
+            'Data Scientist': 'IT',
+            'HR Manager': 'HR',
+            'Sales Rep': 'Sales',
+            'Marketing Specialist': 'Marketing'
+        }
+        department = dept_map.get(job_role, 'IT')
+        
         input_dict = {
             'Age': 30,
             'Gender': 'Male',
             'Education Level': profile.get('Education_Level', 'Bachelor'),
             'Years of Experience': int(profile.get('Years_of_Experience', 2)),
-            'Job Role': profile.get('Job_Role', 'Software Engineer'),
-            'Department': 'Engineering',
+            'Job Role': job_role,
+            'Department': department,
             'Location': profile.get('Location', 'Bangalore'),
             'Performance Rating': 3,
             'Skills': profile.get('Skills', 'Python'),

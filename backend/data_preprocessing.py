@@ -9,7 +9,7 @@ def load_data(filepath):
     """
     Load dataset using pandas.
     """
-    df = pd.read_csv(filepath)
+    df = pd.read_csv(filepath, keep_default_na=False, na_values=['', 'NaN', 'nan', 'null'])
     return df
 
 def get_preprocessor():
